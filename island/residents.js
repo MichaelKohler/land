@@ -2,6 +2,7 @@
 // name (nameOnly); Michael's entry has his places on the web and how he got here.
 //   color   their house's roof, shutters, door and mailbox
 //   garden  the garden around their house: "kitchen", "mediterranean" or "family" (see island/gardens.js)
+//   bicycle a bicycle in their colour parked by the porch steps
 window.RESIDENTS = [
   {
     id: "konstantina",
@@ -9,6 +10,7 @@ window.RESIDENTS = [
     short: "Konstantina",
     color: "#b0524a",
     garden: "mediterranean",
+    bicycle: true,
     nameOnly: true,
     links: [],
     path: [],

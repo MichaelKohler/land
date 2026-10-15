@@ -4,8 +4,9 @@
 import * as THREE from "three";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { makeRng, onSeason } from "./core.js";
-import { S, shadow, canvasTex, makeBench, stoneTex, mStone, mWood, mDark } from "./materials.js";
+import { S, shadow, canvasTex, makeBench, stoneTex, mStone, mWood, mDark, mMetal } from "./materials.js";
 import { D, STEPS } from "./building.js";
+import { heightAt } from "./world.js";
 
 // garden things that come and go with the seasons: { o: object, seasons: [...] }
 const gardenSeasonal = [];
@@ -60,6 +61,7 @@ export function buildGarden({ g, r, i }) {
   bench.position.set(-2.2, 0, D / 2 + 1.2);
   g.add(mbP, mb, mbB, bench);
   style?.garden(ctx);
+  if (r.bicycle) bicycle(ctx);
 }
 
 /* ================= boundaries ================= */
@@ -511,4 +513,91 @@ function porchToys({ g }) {
           Math.PI / 2),
     ),
   );
+}
+
+/* ================= bicycle ================= */
+// a bicycle in the resident's colour, standing on its kickstand beside the porch steps
+function bicycle({ g, r, noGrass }) {
+  const bx = 1.75,
+    bz = D / 2 + 0.5;
+  noGrass(bx, bz, 0.7);
+  // in the bike's own coordinates: x along the bike (front +x), y up, z across
+  const parts = new Map();
+  const put = (m, geo) => (parts.get(m) || parts.set(m, []).get(m)).push(geo);
+  const up = new THREE.Vector3(0, 1, 0);
+  const tube = (m, rad, [ax, ay, az = 0], [cx, cy, cz = 0]) => {
+    const a = new THREE.Vector3(ax, ay, az),
+      d = new THREE.Vector3(cx, cy, cz).sub(a);
+    const geo = new THREE.CylinderGeometry(rad, rad, d.length(), 8);
+    geo.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(up, d.clone().normalize()));
+    put(m, geo.translate(a.x + d.x / 2, a.y + d.y / 2, a.z + d.z / 2));
+  };
+  const frameM = S({ color: r.color, roughness: 0.35, metalness: 0.4 }),
+    tyreM = S({ color: "#1d1d1f", roughness: 0.9 }),
+    leatherM = S({ color: "#5a3a24", roughness: 0.6 });
+  // wheels: tyre, rim, hub and spokes
+  const R = 0.31;
+  [-0.5, 0.5].forEach((x) => {
+    put(tyreM, new THREE.TorusGeometry(R, 0.022, 8, 32).translate(x, R + 0.022, 0));
+    put(mMetal, new THREE.TorusGeometry(R - 0.03, 0.01, 6, 32).translate(x, R + 0.022, 0));
+    put(mMetal, new THREE.CylinderGeometry(0.025, 0.025, 0.08, 8).rotateX(Math.PI / 2).translate(x, R + 0.022, 0));
+    for (let k = 0; k < 8; k++) {
+      const a = (k / 8) * Math.PI;
+      tube(
+        mMetal,
+        0.004,
+        [x - Math.cos(a) * (R - 0.03), R + 0.022 - Math.sin(a) * (R - 0.03)],
+        [x + Math.cos(a) * (R - 0.03), R + 0.022 + Math.sin(a) * (R - 0.03)],
+      );
+    }
+  });
+  const hubY = R + 0.022,
+    rear = [-0.5, hubY],
+    front = [0.5, hubY],
+    crank = [-0.06, 0.3],
+    seat = [-0.2, 0.86],
+    headTop = [0.37, 0.9],
+    headBottom = [0.41, 0.74];
+  // the frame: seat tube, down tube, top tube, the stays back to the rear hub, head tube and fork
+  tube(frameM, 0.022, crank, seat);
+  tube(frameM, 0.024, crank, headBottom);
+  tube(frameM, 0.02, [-0.18, 0.79], [0.37, 0.86]);
+  [-1, 1].forEach((s) => {
+    tube(frameM, 0.013, [rear[0], rear[1], s * 0.04], [crank[0], crank[1], s * 0.03]);
+    tube(frameM, 0.013, [rear[0], rear[1], s * 0.04], [-0.18, 0.79, 0]);
+    tube(frameM, 0.014, [headBottom[0], headBottom[1], 0], [front[0], front[1], s * 0.04]);
+  });
+  tube(frameM, 0.028, headTop, headBottom);
+  // stem, swept-back handlebars with grips, seat post and saddle
+  tube(mMetal, 0.015, headTop, [0.36, 1.0]);
+  tube(mMetal, 0.013, [0.36, 1.0, -0.24], [0.36, 1.0, 0.24]);
+  [-1, 1].forEach((s) => tube(leatherM, 0.02, [0.36, 1.0, s * 0.18], [0.27, 1.0, s * 0.27]));
+  tube(mMetal, 0.013, seat, [-0.22, 0.96]);
+  put(leatherM, new THREE.SphereGeometry(0.1, 12, 8).scale(1.3, 0.3, 0.75).translate(-0.24, 0.97, 0));
+  // chainring, crank arms and pedals
+  put(mMetal, new THREE.CylinderGeometry(0.09, 0.09, 0.012, 20).rotateX(Math.PI / 2).translate(...crank, 0.05));
+  [-1, 1].forEach((s) => {
+    const px = crank[0] + s * 0.06,
+      py = crank[1] - s * 0.13,
+      pz = s * 0.09;
+    tube(mMetal, 0.01, [crank[0], crank[1], pz], [px, py, pz]);
+    put(tyreM, new THREE.BoxGeometry(0.08, 0.025, 0.07).translate(px, py, pz + s * 0.03));
+  });
+  // a chain from the chainring back to the rear hub
+  [0.08, -0.08].forEach((dy) =>
+    tube(mDark, 0.005, [crank[0], crank[1] + dy, 0.05], [rear[0], rear[1] + dy * 0.5, 0.05]),
+  );
+  // the kickstand, out to the plaza side, its foot raised just enough to meet the ground once the bike leans
+  const lean = 0.07,
+    standZ = 0.2;
+  tube(mDark, 0.01, [crank[0] - 0.08, crank[1], 0.03], [crank[0] - 0.14, standZ * Math.tan(lean), standZ]);
+
+  const bike = new THREE.Group();
+  parts.forEach((geos, m) => bike.add(shadow(new THREE.Mesh(mergeGeometries(geos), m))));
+  // stand the tyres on the ground itself, which is a little above the house's y = 0
+  g.updateMatrixWorld();
+  const w = g.localToWorld(new THREE.Vector3(bx, 0, bz));
+  bike.position.set(bx, heightAt(w.x, w.z) - g.position.y, bz);
+  bike.rotation.x = lean; // leaning a little onto the kickstand
+  g.add(bike);
 }
